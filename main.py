@@ -16,6 +16,7 @@ GUI кондиционера (Tkinter + CAN)
 from __future__ import annotations
 import threading, queue, time
 from dataclasses import dataclass
+import json
 from typing import Optional, Dict, List, Any
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -717,10 +718,14 @@ class ACControllerApp(ttk.Frame):
                     if t == "telemetry":
                         self._last_ctrl_rx = now
                         self._ctrl_valid = True
-                        self.var_err.set(str(item.get("err", 0)))
-                        self.var_set.set(str(item.get("set", "--")))
-                        self.var_temp.set(str(item.get("temp", "--")))
-                        self.var_cond.set(str(item.get("cond", "--")))
+                        err_val = item.get("err", 0)
+                        set_val = item.get("set", "--")
+                        temp_val = item.get("temp", "--")
+                        cond_val = item.get("cond", "--")
+                        self.var_err.set(str(err_val))
+                        self.var_set.set(str(set_val))
+                        self.var_temp.set(str(temp_val))
+                        self.var_cond.set(str(cond_val))
 
                         fan_byte = int(item.get("fan_raw", 0))
                         lvl_c = max(0, min(3, (fan_byte >> 4) & 0x0F))
@@ -733,10 +738,10 @@ class ACControllerApp(ttk.Frame):
 
                         state_byte = int(item.get("state_raw", 0))
                         main = (state_byte >> 4) & 0x0F
-                        sub  = state_byte & 0x0F
+                        sub = state_byte & 0x0F
                         self._last_main_state = main
                         main_txt = self.MAIN_STATE.get(main, f"неизв({main})")
-                        sub_txt  = self.SUB_STATE.get(sub,  f"неизв({sub})")
+                        sub_txt = self.SUB_STATE.get(sub, f"неизв({sub})")
                         self.var_state_main.set(f"Main: {main_txt}")
                         self.var_state_sub.set(f"Sub:  {sub_txt}")
 
@@ -755,14 +760,16 @@ class ACControllerApp(ttk.Frame):
                             'sub': sub,
                             'main_txt': main_txt,
                             'sub_txt': sub_txt,
-                            'set': str(item.get("set", "--")),
-                            'temp': str(item.get("temp", "--")),
-                            'cond': str(item.get("cond", "--")),
-                            'err': str(item.get("err", "0")),
+                            'set': set_val,
+                            'temp': temp_val,
+                            'cond': cond_val,
+                            'err': err_val,
                             'fan_level_c': lvl_c,
                             'fan_level_e': lvl_e,
                             'fan_pct_c': int(self.var_fan_pct_c.get()),
                             'fan_pct_e': int(self.var_fan_pct_e.get()),
+                            'fan_raw': fan_byte,
+                            'state_raw': item.get("state_raw"),
                             'raw': raw_list,
                         }
                         prev_snapshot = self._last_ctrl_state_snapshot or {}
@@ -778,33 +785,63 @@ class ACControllerApp(ttk.Frame):
                             prev_sub_txt = self.SUB_STATE.get(prev_sub_code, f"неизв({prev_sub_code})")
                         if prev_sub_txt is None:
                             prev_sub_txt = "—"
-                        if (prev_snapshot.get('main') != snapshot['main']) or \
-                           (prev_snapshot.get('sub') != snapshot['sub']):
-                            raw_str = " ".join(f"{b:02X}" for b in snapshot['raw']) if snapshot['raw'] else "—"
-                            prev_main_display = prev_main_code if prev_main_code is not None else "—"
-                            prev_sub_display = prev_sub_code if prev_sub_code is not None else "—"
+                        if (prev_snapshot.get('main') != snapshot['main']) or (
+                            prev_snapshot.get('sub') != snapshot['sub']
+                        ):
+                            previous_state = None
+                            if prev_main_code is not None or prev_sub_code is not None:
+                                previous_state = {
+                                    'main_code': prev_main_code,
+                                    'main_text': prev_main_txt,
+                                    'sub_code': prev_sub_code,
+                                    'sub_text': prev_sub_txt,
+                                }
+                            change_payload = {
+                                'target': 'controller',
+                                'new_state': {
+                                    'main_code': snapshot['main'],
+                                    'main_text': snapshot['main_txt'],
+                                    'sub_code': snapshot['sub'],
+                                    'sub_text': snapshot['sub_txt'],
+                                },
+                                'previous_state': previous_state,
+                                'telemetry': {
+                                    'setpoint': set_val,
+                                    'temperature': temp_val,
+                                    'condenser_temp': cond_val,
+                                    'error': err_val,
+                                    'fan': {
+                                        'raw_byte': fan_byte,
+                                        'levels': {
+                                            'condenser': snapshot['fan_level_c'],
+                                            'evaporator': snapshot['fan_level_e'],
+                                        },
+                                        'percent': {
+                                            'condenser': snapshot['fan_pct_c'],
+                                            'evaporator': snapshot['fan_pct_e'],
+                                        },
+                                    },
+                                    'state_raw': snapshot['state_raw'],
+                                    'raw_frame': snapshot['raw'],
+                                    'raw_frame_hex': [f"{b:02X}" for b in snapshot['raw']],
+                                },
+                            }
                             self._log_changes(
                                 "Controller state change → "
-                                f"Main: {prev_main_txt} ({prev_main_display}) → {snapshot['main_txt']} ({snapshot['main']}), "
-                                f"Sub: {prev_sub_txt} ({prev_sub_display}) → {snapshot['sub_txt']} ({snapshot['sub']}); "
-                                f"set={snapshot['set']}, temp={snapshot['temp']}, cond={snapshot['cond']}, "
-                                f"err={snapshot['err']}, fan_level_c={snapshot['fan_level_c']}, "
-                                f"fan_level_e={snapshot['fan_level_e']}, "
-                                f"fan_pct_c={snapshot['fan_pct_c']}, fan_pct_e={snapshot['fan_pct_e']}, "
-                                f"raw={raw_str}"
+                                + json.dumps(change_payload, ensure_ascii=False)
                             )
                         self._last_ctrl_state_snapshot = snapshot
 
-                      elif t == "inv":
+                    elif t == "inv":
                         self._last_inv_rx = now
                         self._inv_valid = True
 
-                        cur_val = str(item.get("cur", "--"))
-                        volt_val = str(item.get("volt", "--"))
-                        temp_val = str(item.get("temp", "--"))
-                        self.var_inv_cur.set(cur_val)
-                        self.var_inv_volt.set(volt_val)
-                        self.var_inv_temp.set(temp_val)
+                        cur_val = item.get("cur", "--")
+                        volt_val = item.get("volt", "--")
+                        temp_val = item.get("temp", "--")
+                        self.var_inv_cur.set(str(cur_val))
+                        self.var_inv_volt.set(str(volt_val))
+                        self.var_inv_temp.set(str(temp_val))
 
                         raw_val = item.get("raw")
                         if isinstance(raw_val, (list, tuple)):
@@ -826,8 +863,11 @@ class ACControllerApp(ttk.Frame):
                             'sub': prev_snapshot.get('sub'),
                             'main_txt': prev_snapshot.get('main_txt', "—"),
                             'sub_txt': prev_snapshot.get('sub_txt', "—"),
-                            'err_mask': prev_snapshot.get('err_mask', "—"),
+                            'err_mask_value': prev_snapshot.get('err_mask_value'),
+                            'err_mask_hex': prev_snapshot.get('err_mask_hex', "—"),
                             'err_txt': prev_snapshot.get('err_txt', "—"),
+                            'state6': prev_snapshot.get('state6'),
+                            'state7': prev_snapshot.get('state7'),
                         }
 
                         main_changed = False
@@ -835,6 +875,7 @@ class ACControllerApp(ttk.Frame):
 
                         if 'state7' in item:
                             s7 = int(item['state7'])
+                            snapshot['state7'] = s7
                             snapshot['main'] = s7
                             snapshot['main_txt'] = self.INV_MAIN.get(s7, f"неизв({s7})")
                             self.var_inv_main.set(f"Main: {snapshot['main_txt']}")
@@ -844,6 +885,7 @@ class ACControllerApp(ttk.Frame):
 
                         if 'state6' in item:
                             s6 = int(item['state6'])
+                            snapshot['state6'] = s6
                             snapshot['sub'] = s6
                             snapshot['sub_txt'] = self.INV_SUB.get(s6, f"неизв({s6})")
                             self.var_inv_sub.set(f"Sub:  {snapshot['sub_txt']}")
@@ -855,13 +897,11 @@ class ACControllerApp(ttk.Frame):
                             err_mask = int(item['err5'])
                             err_txt = self._format_inv_errors(err_mask)
                             self.var_inv_errs.set(err_txt)
-                            snapshot['err_mask'] = f"0x{err_mask:02X}"
+                            snapshot['err_mask_value'] = err_mask
+                            snapshot['err_mask_hex'] = f"0x{err_mask:02X}"
                             snapshot['err_txt'] = err_txt
 
                         if main_changed or sub_changed:
-                            raw_str = " ".join(f"{b:02X}" for b in snapshot['raw']) if snapshot['raw'] else "—"
-                            main_display = snapshot['main'] if snapshot['main'] is not None else "—"
-                            sub_display = snapshot['sub'] if snapshot['sub'] is not None else "—"
                             prev_main_code = prev_snapshot.get('main')
                             prev_sub_code = prev_snapshot.get('sub')
                             prev_main_txt = prev_snapshot.get('main_txt')
@@ -874,15 +914,41 @@ class ACControllerApp(ttk.Frame):
                                 prev_sub_txt = self.INV_SUB.get(prev_sub_code, f"неизв({prev_sub_code})")
                             if prev_sub_txt is None:
                                 prev_sub_txt = "—"
-                            prev_main_display = prev_main_code if prev_main_code is not None else "—"
-                            prev_sub_display = prev_sub_code if prev_sub_code is not None else "—"
+                            previous_state = None
+                            if prev_main_code is not None or prev_sub_code is not None:
+                                previous_state = {
+                                    'main_code': prev_main_code,
+                                    'main_text': prev_main_txt,
+                                    'sub_code': prev_sub_code,
+                                    'sub_text': prev_sub_txt,
+                                }
+                            change_payload = {
+                                'target': 'inverter',
+                                'new_state': {
+                                    'main_code': snapshot['main'],
+                                    'main_text': snapshot['main_txt'],
+                                    'sub_code': snapshot['sub'],
+                                    'sub_text': snapshot['sub_txt'],
+                                },
+                                'previous_state': previous_state,
+                                'telemetry': {
+                                    'current': cur_val,
+                                    'voltage': volt_val,
+                                    'temperature': temp_val,
+                                    'error_mask': snapshot.get('err_mask_value'),
+                                    'error_mask_hex': snapshot.get('err_mask_hex'),
+                                    'error_text': snapshot.get('err_txt'),
+                                    'state_bytes': {
+                                        'state6': snapshot.get('state6'),
+                                        'state7': snapshot.get('state7'),
+                                    },
+                                    'raw_frame': snapshot['raw'],
+                                    'raw_frame_hex': [f"{b:02X}" for b in snapshot['raw']],
+                                },
+                            }
                             self._log_changes(
                                 "Inverter state change → "
-                                f"Main: {prev_main_txt} ({prev_main_display}) → {snapshot['main_txt']} ({main_display}), "
-                                f"Sub: {prev_sub_txt} ({prev_sub_display}) → {snapshot['sub_txt']} ({sub_display}); "
-                                f"cur={snapshot['cur']}A, volt={snapshot['volt']}V, temp={snapshot['temp']}°C, "
-                                f"err_mask={snapshot['err_mask']}, err_text={snapshot['err_txt']}, "
-                                f"raw={raw_str}"
+                                + json.dumps(change_payload, ensure_ascii=False)
                             )
 
                         self._last_inv_state_snapshot = snapshot
@@ -920,6 +986,7 @@ class ACControllerApp(ttk.Frame):
             return
         ts = time.strftime("%H:%M:%S")
         line = f"[{ts}] {text}"
+        print(line, flush=True)
         self.txt_changes.config(state=tk.NORMAL)
         self.txt_changes.insert(tk.END, line + "\n")
         self.txt_changes.see(tk.END)
