@@ -350,6 +350,8 @@ class ACControllerApp(ttk.Frame):
         self._last_inv_rx: float = 0.0
         self._ctrl_valid = False
         self._inv_valid = False
+        self._last_ctrl_state_snapshot: Optional[Dict[str, Any]] = None
+        self._last_inv_state_snapshot: Optional[Dict[str, Any]] = None
 
         self.var_status = tk.StringVar(value="Отключено")
 
@@ -416,11 +418,29 @@ class ACControllerApp(ttk.Frame):
         self.rowconfigure(4, weight=1)
         logf.rowconfigure(0, weight=1)
         logf.columnconfigure(0, weight=1)
-        self.txt_log = tk.Text(logf, height=9)
+
+        self.log_nb = ttk.Notebook(logf)
+        self.log_nb.grid(row=0, column=0, sticky="nsew")
+
+        tab_log = ttk.Frame(self.log_nb)
+        tab_log.rowconfigure(0, weight=1)
+        tab_log.columnconfigure(0, weight=1)
+        self.txt_log = tk.Text(tab_log, height=9)
         self.txt_log.grid(row=0, column=0, sticky="nsew")
-        sb = ttk.Scrollbar(logf, command=self.txt_log.yview)
-        sb.grid(row=0, column=1, sticky="ns")
-        self.txt_log['yscrollcommand'] = sb.set
+        sb_log = ttk.Scrollbar(tab_log, command=self.txt_log.yview)
+        sb_log.grid(row=0, column=1, sticky="ns")
+        self.txt_log['yscrollcommand'] = sb_log.set
+        self.log_nb.add(tab_log, text="Log")
+
+        tab_changes = ttk.Frame(self.log_nb)
+        tab_changes.rowconfigure(0, weight=1)
+        tab_changes.columnconfigure(0, weight=1)
+        self.txt_changes = tk.Text(tab_changes, height=9, state=tk.DISABLED)
+        self.txt_changes.grid(row=0, column=0, sticky="nsew")
+        sb_changes = ttk.Scrollbar(tab_changes, command=self.txt_changes.yview)
+        sb_changes.grid(row=0, column=1, sticky="ns")
+        self.txt_changes['yscrollcommand'] = sb_changes.set
+        self.log_nb.add(tab_changes, text="ChangesStates")
 
         status = ttk.Label(self, textvariable=self.var_status, relief=tk.SUNKEN, anchor="w")
         status.grid(row=5, column=0, sticky="ew", padx=2, pady=(0,2))
@@ -586,6 +606,8 @@ class ACControllerApp(ttk.Frame):
             self._client = None
             self.var_status.set("Отключено")
             self._log("CAN отключён")
+            self._last_ctrl_state_snapshot = None
+            self._last_inv_state_snapshot = None
 
     # Получение уставки из блока «Состояние кондиционера»
     def _get_state_setpoint(self) -> Optional[int]:
@@ -662,6 +684,7 @@ class ACControllerApp(ttk.Frame):
         self.var_fan_level_c.set(0)
         self.var_fan_level_e.set(0)
         self._update_gauges_with_current_levels()
+        self._last_ctrl_state_snapshot = None
 
     def _reset_inv_display(self):
         self.var_inv_cur.set("--")
@@ -670,6 +693,7 @@ class ACControllerApp(ttk.Frame):
         self.var_inv_main.set("—")
         self.var_inv_sub.set("—")
         self.var_inv_errs.set("—")
+        self._last_inv_state_snapshot = None
 
     # Форматирование ошибок инвертора из байта 5
     @staticmethod
@@ -716,27 +740,124 @@ class ACControllerApp(ttk.Frame):
                         self.var_state_main.set(f"Main: {main_txt}")
                         self.var_state_sub.set(f"Sub:  {sub_txt}")
 
-                        raw = item.get("raw", [])
-                        if raw:
-                            self._log("RX TELEM: " + " ".join(f"{b:02X}" for b in raw))
+                        raw_val = item.get("raw")
+                        if isinstance(raw_val, (list, tuple)):
+                            raw_list = list(raw_val)
+                        elif isinstance(raw_val, (bytes, bytearray)):
+                            raw_list = list(raw_val)
+                        else:
+                            raw_list = []
+                        if raw_list:
+                            self._log("RX TELEM: " + " ".join(f"{b:02X}" for b in raw_list))
 
-                    elif t == "inv":
+                        snapshot = {
+                            'main': main,
+                            'sub': sub,
+                            'main_txt': main_txt,
+                            'sub_txt': sub_txt,
+                            'set': str(item.get("set", "--")),
+                            'temp': str(item.get("temp", "--")),
+                            'cond': str(item.get("cond", "--")),
+                            'err': str(item.get("err", "0")),
+                            'fan_level_c': lvl_c,
+                            'fan_level_e': lvl_e,
+                            'fan_pct_c': int(self.var_fan_pct_c.get()),
+                            'fan_pct_e': int(self.var_fan_pct_e.get()),
+                            'raw': raw_list,
+                        }
+                        prev_snapshot = self._last_ctrl_state_snapshot or {}
+                        if (prev_snapshot.get('main') != snapshot['main']) or \
+                           (prev_snapshot.get('sub') != snapshot['sub']):
+                            raw_str = " ".join(f"{b:02X}" for b in snapshot['raw']) if snapshot['raw'] else "—"
+                            self._log_changes(
+                                "Controller state change → "
+                                f"Main={snapshot['main_txt']} ({snapshot['main']}), "
+                                f"Sub={snapshot['sub_txt']} ({snapshot['sub']}); "
+                                f"set={snapshot['set']}, temp={snapshot['temp']}, cond={snapshot['cond']}, "
+                                f"err={snapshot['err']}, fan_level_c={snapshot['fan_level_c']}, "
+                                f"fan_level_e={snapshot['fan_level_e']}, "
+                                f"fan_pct_c={snapshot['fan_pct_c']}, fan_pct_e={snapshot['fan_pct_e']}, "
+                                f"raw={raw_str}"
+                            )
+                        self._last_ctrl_state_snapshot = snapshot
+
+                      elif t == "inv":
                         self._last_inv_rx = now
                         self._inv_valid = True
-                        self.var_inv_cur.set(str(item.get("cur", "--")))
-                        self.var_inv_volt.set(str(item.get("volt", "--")))
-                        self.var_inv_temp.set(str(item.get("temp", "--")))
+
+                        cur_val = str(item.get("cur", "--"))
+                        volt_val = str(item.get("volt", "--"))
+                        temp_val = str(item.get("temp", "--"))
+                        self.var_inv_cur.set(cur_val)
+                        self.var_inv_volt.set(volt_val)
+                        self.var_inv_temp.set(temp_val)
+
+                        raw_val = item.get("raw")
+                        if isinstance(raw_val, (list, tuple)):
+                            inv_raw = list(raw_val)
+                        elif isinstance(raw_val, (bytes, bytearray)):
+                            inv_raw = list(raw_val)
+                        else:
+                            inv_raw = []
+                        if inv_raw:
+                            self._log("RX INV: " + " ".join(f"{b:02X}" for b in inv_raw))
+
+                        prev_snapshot = self._last_inv_state_snapshot or {}
+                        snapshot = {
+                            'cur': cur_val,
+                            'volt': volt_val,
+                            'temp': temp_val,
+                            'raw': inv_raw,
+                            'main': prev_snapshot.get('main'),
+                            'sub': prev_snapshot.get('sub'),
+                            'main_txt': prev_snapshot.get('main_txt', "—"),
+                            'sub_txt': prev_snapshot.get('sub_txt', "—"),
+                            'err_mask': prev_snapshot.get('err_mask', "—"),
+                            'err_txt': prev_snapshot.get('err_txt', "—"),
+                        }
+
+                        main_changed = False
+                        sub_changed = False
+
                         if 'state7' in item:
                             s7 = int(item['state7'])
-                            self.var_inv_main.set(f"Main: {self.INV_MAIN.get(s7, f'неизв({s7})')}")
+                            snapshot['main'] = s7
+                            snapshot['main_txt'] = self.INV_MAIN.get(s7, f"неизв({s7})")
+                            self.var_inv_main.set(f"Main: {snapshot['main_txt']}")
+                            main_changed = prev_snapshot.get('main') != s7
+                        elif snapshot['main'] is not None:
+                            snapshot['main_txt'] = self.INV_MAIN.get(snapshot['main'], f"неизв({snapshot['main']})")
+
                         if 'state6' in item:
                             s6 = int(item['state6'])
-                            self.var_inv_sub.set(f"Sub:  {self.INV_SUB.get(s6, f'неизв({s6})')}")
+                            snapshot['sub'] = s6
+                            snapshot['sub_txt'] = self.INV_SUB.get(s6, f"неизв({s6})")
+                            self.var_inv_sub.set(f"Sub:  {snapshot['sub_txt']}")
+                            sub_changed = prev_snapshot.get('sub') != s6
+                        elif snapshot['sub'] is not None:
+                            snapshot['sub_txt'] = self.INV_SUB.get(snapshot['sub'], f"неизв({snapshot['sub']})")
+
                         if 'err5' in item:
-                            self.var_inv_errs.set(self._format_inv_errors(int(item['err5'])))
-                        raw = item.get("raw", [])
-                        if raw:
-                            self._log("RX INV: " + " ".join(f"{b:02X}" for b in raw))
+                            err_mask = int(item['err5'])
+                            err_txt = self._format_inv_errors(err_mask)
+                            self.var_inv_errs.set(err_txt)
+                            snapshot['err_mask'] = f"0x{err_mask:02X}"
+                            snapshot['err_txt'] = err_txt
+
+                        if main_changed or sub_changed:
+                            raw_str = " ".join(f"{b:02X}" for b in snapshot['raw']) if snapshot['raw'] else "—"
+                            main_display = snapshot['main'] if snapshot['main'] is not None else "—"
+                            sub_display = snapshot['sub'] if snapshot['sub'] is not None else "—"
+                            self._log_changes(
+                                "Inverter state change → "
+                                f"Main={snapshot['main_txt']} ({main_display}), "
+                                f"Sub={snapshot['sub_txt']} ({sub_display}); "
+                                f"cur={snapshot['cur']}A, volt={snapshot['volt']}V, temp={snapshot['temp']}°C, "
+                                f"err_mask={snapshot['err_mask']}, err_text={snapshot['err_txt']}, "
+                                f"raw={raw_str}"
+                            )
+
+                        self._last_inv_state_snapshot = snapshot
 
                     elif t == "tx":
                         data_hex = " ".join(f"{b:02X}" for b in item.get("data", []))
@@ -765,6 +886,16 @@ class ACControllerApp(ttk.Frame):
         print(line, flush=True)
         self.txt_log.insert(tk.END, line + "\n")
         self.txt_log.see(tk.END)
+
+    def _log_changes(self, text: str):
+        if not hasattr(self, "txt_changes"):
+            return
+        ts = time.strftime("%H:%M:%S")
+        line = f"[{ts}] {text}"
+        self.txt_changes.config(state=tk.NORMAL)
+        self.txt_changes.insert(tk.END, line + "\n")
+        self.txt_changes.see(tk.END)
+        self.txt_changes.config(state=tk.DISABLED)
 
 
 def main():
