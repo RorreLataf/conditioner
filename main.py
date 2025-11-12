@@ -766,13 +766,27 @@ class ACControllerApp(ttk.Frame):
                             'raw': raw_list,
                         }
                         prev_snapshot = self._last_ctrl_state_snapshot or {}
+                        prev_main_code = prev_snapshot.get('main')
+                        prev_sub_code = prev_snapshot.get('sub')
+                        prev_main_txt = prev_snapshot.get('main_txt')
+                        if prev_main_txt is None and prev_main_code is not None:
+                            prev_main_txt = self.MAIN_STATE.get(prev_main_code, f"неизв({prev_main_code})")
+                        if prev_main_txt is None:
+                            prev_main_txt = "—"
+                        prev_sub_txt = prev_snapshot.get('sub_txt')
+                        if prev_sub_txt is None and prev_sub_code is not None:
+                            prev_sub_txt = self.SUB_STATE.get(prev_sub_code, f"неизв({prev_sub_code})")
+                        if prev_sub_txt is None:
+                            prev_sub_txt = "—"
                         if (prev_snapshot.get('main') != snapshot['main']) or \
                            (prev_snapshot.get('sub') != snapshot['sub']):
                             raw_str = " ".join(f"{b:02X}" for b in snapshot['raw']) if snapshot['raw'] else "—"
+                            prev_main_display = prev_main_code if prev_main_code is not None else "—"
+                            prev_sub_display = prev_sub_code if prev_sub_code is not None else "—"
                             self._log_changes(
                                 "Controller state change → "
-                                f"Main={snapshot['main_txt']} ({snapshot['main']}), "
-                                f"Sub={snapshot['sub_txt']} ({snapshot['sub']}); "
+                                f"Main: {prev_main_txt} ({prev_main_display}) → {snapshot['main_txt']} ({snapshot['main']}), "
+                                f"Sub: {prev_sub_txt} ({prev_sub_display}) → {snapshot['sub_txt']} ({snapshot['sub']}); "
                                 f"set={snapshot['set']}, temp={snapshot['temp']}, cond={snapshot['cond']}, "
                                 f"err={snapshot['err']}, fan_level_c={snapshot['fan_level_c']}, "
                                 f"fan_level_e={snapshot['fan_level_e']}, "
@@ -848,10 +862,24 @@ class ACControllerApp(ttk.Frame):
                             raw_str = " ".join(f"{b:02X}" for b in snapshot['raw']) if snapshot['raw'] else "—"
                             main_display = snapshot['main'] if snapshot['main'] is not None else "—"
                             sub_display = snapshot['sub'] if snapshot['sub'] is not None else "—"
+                            prev_main_code = prev_snapshot.get('main')
+                            prev_sub_code = prev_snapshot.get('sub')
+                            prev_main_txt = prev_snapshot.get('main_txt')
+                            if prev_main_txt is None and prev_main_code is not None:
+                                prev_main_txt = self.INV_MAIN.get(prev_main_code, f"неизв({prev_main_code})")
+                            if prev_main_txt is None:
+                                prev_main_txt = "—"
+                            prev_sub_txt = prev_snapshot.get('sub_txt')
+                            if prev_sub_txt is None and prev_sub_code is not None:
+                                prev_sub_txt = self.INV_SUB.get(prev_sub_code, f"неизв({prev_sub_code})")
+                            if prev_sub_txt is None:
+                                prev_sub_txt = "—"
+                            prev_main_display = prev_main_code if prev_main_code is not None else "—"
+                            prev_sub_display = prev_sub_code if prev_sub_code is not None else "—"
                             self._log_changes(
                                 "Inverter state change → "
-                                f"Main={snapshot['main_txt']} ({main_display}), "
-                                f"Sub={snapshot['sub_txt']} ({sub_display}); "
+                                f"Main: {prev_main_txt} ({prev_main_display}) → {snapshot['main_txt']} ({main_display}), "
+                                f"Sub: {prev_sub_txt} ({prev_sub_display}) → {snapshot['sub_txt']} ({sub_display}); "
                                 f"cur={snapshot['cur']}A, volt={snapshot['volt']}V, temp={snapshot['temp']}°C, "
                                 f"err_mask={snapshot['err_mask']}, err_text={snapshot['err_txt']}, "
                                 f"raw={raw_str}"
