@@ -1,0 +1,72 @@
+bus:
+  interface: virtual
+  channel: vcan0
+  bitrate: 250000
+
+messages:
+  TELEMETRY:
+    id: "0x5E0100"
+    extended: true
+  INVERTER_TELEMETRY:
+    id: "0x5E0200"
+    extended: true
+  START:
+    id: "0x5E0300"
+    extended: true
+    data_template:
+      - { value: 0x01 }
+      - { value: 0x00 }
+      - { value: 0x00 }
+      - { value: 0x00 }
+      - { value: 0x00 }
+      - { value: 0x00 }
+      - { value: 0x00 }
+      - { field: "value", scale: 1.0, bytes: 1 }
+  STOP:
+    id: "0x5E0300"
+    extended: true
+    data_template:
+      - { value: 0x02 }
+      - { value: 0x00 }
+      - { value: 0x00 }
+      - { value: 0x00 }
+      - { value: 0x00 }
+      - { value: 0x00 }
+      - { value: 0x00 }
+      - { field: "value", scale: 1.0, bytes: 1 }
+  SET:
+    id: "0x5E0300"
+    extended: true
+    data_template:
+      - { value: 0x03 }
+      - { value: 0x00 }
+      - { field: "mode", scale: 1.0, bytes: 1 }
+      - { value: 0x00 }
+      - { value: 0x00 }
+      - { value: 0x00 }
+      - { value: 0x00 }
+      - { field: "value", scale: 1.0, bytes: 1 }
+  PARAMS_SPEED:
+    id: "0x5E0400"
+    extended: true
+    data_template:
+      - { field: "c1", scale: 1.0, bytes: 1 }
+      - { field: "c2", scale: 1.0, bytes: 1 }
+      - { field: "c3", scale: 1.0, bytes: 1 }
+      - { field: "e1", scale: 1.0, bytes: 1 }
+      - { field: "e2", scale: 1.0, bytes: 1 }
+      - { field: "e3", scale: 1.0, bytes: 1 }
+      - { value: 0x00 }
+      - { value: 0x00 }
+  PARAMS_TEMP:
+    id: "0x5E0500"
+    extended: true
+    data_template:
+      - { field: "t1", scale: 1.0, bytes: 1 }
+      - { field: "t2", scale: 1.0, bytes: 1 }
+      - { field: "t3", scale: 1.0, bytes: 1 }
+      - { field: "t4", scale: 1.0, bytes: 1 }
+      - { value: 0x00 }
+      - { value: 0x00 }
+      - { value: 0x00 }
+      - { value: 0x00 }
